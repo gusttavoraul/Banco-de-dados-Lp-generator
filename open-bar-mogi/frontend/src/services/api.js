@@ -1,0 +1,58 @@
+import axios from "axios"
+
+export const TOKEN_KEY = "obm_admin_token"
+export const UNAUTHORIZED_EVENT = "auth:unauthorized"
+
+export const api = axios.create({
+  // Em dev o Vite repassa /api para o Express (ver vite.config.js).
+  baseURL: import.meta.env.VITE_API_URL || "/api",
+  timeout: 15000,
+})
+
+export function readToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function saveToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // localStorage indisponível (ex.: aba anônima bloqueada) — segue só em memória.
+  }
+}
+
+// Envia o token JWT em toda requisição.
+api.interceptors.request.use((request) => {
+  const token = readToken()
+  if (token) request.headers.Authorization = `Bearer ${token}`
+  return request
+})
+
+// Token expirado/inválido: avisa o AuthContext para deslogar.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isLoginRequest = error.config?.url?.includes("/auth/login")
+    if (error.response?.status === 401 && !isLoginRequest) {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    }
+    return Promise.reject(error)
+  },
+)
+
+export function getErrorMessage(error, fallback = "Algo deu errado. Tente novamente.") {
+  if (error?.response?.data?.error) return error.response.data.error
+  if (error?.code === "ECONNABORTED" || !error?.response) {
+    return "Não foi possível conectar ao servidor. Verifique sua conexão."
+  }
+  return fallback
+}
+
+export function getFieldErrors(error) {
+  return error?.response?.data?.fields ?? {}
+}

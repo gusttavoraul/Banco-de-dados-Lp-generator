@@ -1,0 +1,84 @@
+// Schema do banco de dados do Open Bar Mogi.
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum QuoteStatus {
+  PENDENTE
+  APROVADO
+  RECUSADO
+}
+
+// Membros da equipe que acessam o painel /admin.
+model Admin {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("admins")
+}
+
+// Quem pede orçamento pela landing page. Identificado pelo e-mail:
+// um cliente que volta a pedir orçamento reaproveita o mesmo registro.
+model Client {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  phone     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  quotes Quote[]
+
+  @@map("clients")
+}
+
+// Pacotes oferecidos (Sem álcool, Alcoólico, Misto).
+model Package {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  quotes Quote[]
+
+  @@map("packages")
+}
+
+model Quote {
+  id             String      @id @default(uuid())
+  eventType      String      @map("event_type")
+  eventDate      DateTime    @map("event_date") @db.Date
+  guests         Int
+  duration       String?
+  location       String?
+  extras         String[]    @default([])
+  estimatedValue Decimal     @map("estimated_value") @db.Decimal(10, 2)
+  status         QuoteStatus @default(PENDENTE)
+  notes          String?     // observações do cliente
+  adminNotes     String?     @map("admin_notes") // observações internas da equipe
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  clientId  String  @map("client_id")
+  client    Client  @relation(fields: [clientId], references: [id])
+  packageId String  @map("package_id")
+  package   Package @relation(fields: [packageId], references: [id])
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("quotes")
+}
