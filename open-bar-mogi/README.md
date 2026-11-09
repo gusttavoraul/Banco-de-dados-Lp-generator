@@ -102,15 +102,8 @@ Mudou o schema? Rode `npm run db:migrate --prefix backend` para gerar uma nova m
 
 ## Publicando (produção)
 
-**Banco**: crie um PostgreSQL gerenciado (Neon, Supabase, Render ou Railway) e copie a connection string.
+Passo a passo completo em [`DEPLOY.md`](DEPLOY.md). Resumo:
 
-**Back-end** (ex.: Render → Web Service):
-- Root directory: `open-bar-mogi/backend`
-- Build command: `npm install && npx prisma migrate deploy`
-- Start command: `npm start`
-- Variáveis: `DATABASE_URL`, `JWT_SECRET` (aleatório, 32+ caracteres), `CORS_ORIGIN` (URL do front, ex.: `https://openbarmogi.vercel.app`), `NODE_ENV=production`, `TRUST_PROXY=1`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`
-- Depois do primeiro deploy, rode uma vez `npm run db:seed` (pelo Shell do Render, ou localmente com `DATABASE_URL` apontando para o banco de produção) para criar os pacotes e o admin.
-
-**Front-end** (Vercel, já tem `vercel.json`):
-- Root directory: `open-bar-mogi/frontend`
-- Variável: `VITE_API_URL=https://<sua-api>/api`
+- **Banco**: PostgreSQL gerenciado (ex.: Neon) — copie a connection string.
+- **API** (ex.: Render, Root directory `open-bar-mogi/backend`): build `npm install`, start `npm run start:prod` (aplica as migrações, cria pacotes/admin e sobe a API). Variáveis: `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`, `TRUST_PROXY=1`, `CORS_ORIGIN`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+- **Site** (Netlify ou Vercel): rode `npm run build` e publique `frontend/dist`. O endereço da API fica em `dist/config.js` (`window.OBM_API_URL`), editável sem recompilar — ou defina `VITE_API_URL` na build.

@@ -4,8 +4,8 @@ export const TOKEN_KEY = "obm_admin_token"
 export const UNAUTHORIZED_EVENT = "auth:unauthorized"
 
 export const api = axios.create({
-  // Em dev o Vite repassa /api para o Express (ver vite.config.js).
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  // Ordem: public/config.js (editável após a build) > VITE_API_URL > "/api" (proxy do Vite em dev).
+  baseURL: window.OBM_API_URL || import.meta.env.VITE_API_URL || "/api",
   timeout: 15000,
 })
 
