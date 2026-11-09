@@ -45,7 +45,19 @@ api.interceptors.response.use(
   },
 )
 
+// Quando o endereço da API está errado, o servidor do site devolve o index.html
+// (texto) em vez de JSON. Isso evita que a tela quebre e mostra um erro claro.
+export class BadApiResponseError extends Error {}
+
+export function pick(data, key, isValid = (value) => value != null) {
+  if (data && typeof data === "object" && isValid(data[key])) return data[key]
+  throw new BadApiResponseError(
+    "A API respondeu algo inesperado. Confira o endereço da API (config.js ou VITE_API_URL).",
+  )
+}
+
 export function getErrorMessage(error, fallback = "Algo deu errado. Tente novamente.") {
+  if (error instanceof BadApiResponseError) return error.message
   if (error?.response?.data?.error) return error.response.data.error
   if (error?.code === "ECONNABORTED" || !error?.response) {
     return "Não foi possível conectar ao servidor. Verifique sua conexão."
