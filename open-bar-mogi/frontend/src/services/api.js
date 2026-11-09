@@ -6,7 +6,8 @@ export const UNAUTHORIZED_EVENT = "auth:unauthorized"
 export const api = axios.create({
   // Ordem: public/config.js (editável após a build) > VITE_API_URL > "/api" (proxy do Vite em dev).
   baseURL: window.OBM_API_URL || import.meta.env.VITE_API_URL || "/api",
-  timeout: 15000,
+  // 60s: no plano grátis do Render a API "dorme" e leva ~50s para acordar.
+  timeout: 60000,
 })
 
 export function readToken() {
