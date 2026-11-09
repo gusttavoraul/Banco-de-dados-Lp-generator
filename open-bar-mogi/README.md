@@ -2,6 +2,8 @@
 
 Landing page onde clientes pedem orçamento + painel `/admin` onde a equipe gerencia os pedidos.
 
+Detalhes de implementação: [`ARQUITETURA.md`](ARQUITETURA.md) · Publicação: [`DEPLOY.md`](DEPLOY.md)
+
 ```
 open-bar-mogi/
 ├── backend/    API Node.js + Express + Prisma (PostgreSQL) + JWT
