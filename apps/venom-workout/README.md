@@ -61,7 +61,7 @@ Para mudar horários, temas ou datas sem aula, editar `GYM` em `data.js` (na fas
 ```
 apps/venom-workout/
 ├── index.html            # shell + splash
-├── styles.css            # tema Venom (preto + verde veneno)
+├── styles.css            # tema Venom (preto + vermelho)
 ├── data.js               # catálogo de movimentos + grade da Skyfit
 ├── app.js                # lógica (auth, agenda, PRs, feed, perfil, coach)
 ├── sw.js                 # cache offline
