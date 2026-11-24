@@ -132,6 +132,13 @@ function openModal(html, onMount) {
   onMount && onMount(s);
 }
 function closeModal() { $('#modal').hidden = true; document.body.style.overflow = ''; }
+// confirmação dentro do app (sem confirm() do navegador)
+function askConfirm(title, text, onYes, onNo) {
+  openModal(`<h2>${esc(title)}</h2><p class="muted">${esc(text)}</p><div class="row"><button class="btn ghost" id="cf-no">Voltar</button><button class="btn danger" id="cf-yes">Excluir</button></div>`, (s) => {
+    $('#cf-no', s).onclick = () => (onNo ? onNo() : closeModal());
+    $('#cf-yes', s).onclick = onYes;
+  });
+}
 const emptyState = (ico, text) => `<div class="empty"><span class="e-ico">${ico}</span>${text}</div>`;
 const avatarHtml = (u, cls = '') => `<div class="avatar ${cls}" data-avatar="${u ? esc(u.id) : ''}">${u && u.photo ? `<img src="${u.photo}" alt="">` : esc(initials(u ? u.name : '?'))}</div>`;
 
@@ -146,7 +153,7 @@ async function boot() {
     $('#splash').classList.add('out');
     if (me) startApp(); else renderAuth('login');
   }, 2600);
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  try { if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch { /* sem suporte (ex.: prévia embutida) */ }
 }
 
 function renderAuth(mode) {
@@ -216,7 +223,7 @@ function startApp() {
   $('#auth').hidden = true; $('#app').hidden = false;
   $('#btn-notif').onclick = showNotifications;
   window.onhashchange = route;
-  if (!location.hash) location.hash = '#/home'; else route();
+  if (!location.hash) location.hash = '#home'; else route();
 }
 
 function route() {
@@ -478,10 +485,9 @@ function showMovement(mov) {
     ${list.length ? `<h3 class="group-title">Histórico</h3><ul class="list">${list.map((p) => `<li><div class="grow"><div class="title">${esc(prLabel(p))} ${p === b ? '<span class="chip">PR</span>' : ''}</div><div class="muted small">${fmtDate(p.date)}${p.classTime ? ' · aula ' + p.classTime : ''} · ${p.rx ? 'RX' : 'Scaled'}${p.notes ? ' · ' + esc(p.notes) : ''}</div></div><button class="link-btn small" data-del="${p.id}" style="color:var(--danger)">excluir</button></li>`).join('')}</ul>` : ''}
   `, (s) => {
     $('#new-pr', s).onclick = () => prForm(mov, type);
-    $$('[data-del]', s).forEach((btn) => btn.onclick = () => {
-      if (!confirm('Excluir este registro?')) return;
+    $$('[data-del]', s).forEach((btn) => btn.onclick = () => askConfirm('Excluir este registro?', 'O registro sai do seu histórico de PRs.', () => {
       db.set('prs', prs().filter((p) => p.id !== btn.dataset.del)); showMovement(mov); refreshBehind();
-    });
+    }, () => showMovement(mov)));
   });
 }
 
@@ -585,12 +591,11 @@ function bindPosts(v) {
     $('#cm-text', s).focus();
     $('#cm-send', s).onclick = () => { const t = $('#cm-text', s).value.trim(); if (!t) return; update(b.dataset.comment, (p) => p.comments.push({ userId: me.id, text: t, ts: Date.now() })); closeModal(); route(); };
   }));
-  $$('[data-delpost]', v).forEach((b) => b.onclick = () => {
-    if (!confirm('Excluir esta publicação?')) return;
+  $$('[data-delpost]', v).forEach((b) => b.onclick = () => askConfirm('Excluir esta publicação?', 'A foto e o treino saem do feed da equipe.', () => {
     const all = db.get('posts', []); const p = all.find((x) => x.id === b.dataset.delpost);
     if (p && p.img) imgStore.del(p.img);
-    db.set('posts', all.filter((x) => x.id !== b.dataset.delpost)); route();
-  });
+    db.set('posts', all.filter((x) => x.id !== b.dataset.delpost)); closeModal(); route();
+  }));
 }
 function postForm() {
   let photo = null;
@@ -660,7 +665,7 @@ function viewHome(v) {
       ${next ? `<span class="muted small">PRÓXIMA AULA</span>
         <div class="big">${fmtDate(next.date)} · <span class="venom">${next.time}</span></div>
         <div class="muted small" style="margin-bottom:12px">${esc(classType(next.time, next.date))} · ${esc(GYM.name)} ${statusOf(next) === 'waitlist' ? `· <span class="chip warn">${positionOf(next)}º na fila</span>` : ''}</div>
-        <a class="btn sm" href="#/agenda">Ver agenda</a>`
+        <a class="btn sm" href="#agenda">Ver agenda</a>`
       : `<span class="muted small">NENHUMA AULA AGENDADA</span><div class="big">Bora treinar?</div><p class="muted small">Garanta sua vaga na turma.</p><a class="btn sm" href="#/agenda">Agendar aula</a>`}
     </div>
     <div class="stats">
@@ -672,7 +677,7 @@ function viewHome(v) {
     ${wod ? `<div class="card"><div class="card-head"><h2>${esc(wod.title || 'WOD do dia')}</h2><span class="chip gray">${fmtShort(wod.date)}</span></div><div class="wod" style="margin:0">${esc(wod.text)}</div>
       <button class="btn ghost sm" style="margin-top:12px" id="log-wod">Registrar meu resultado</button></div>` : ''}
     <div class="card">
-      <div class="card-head"><h2>Últimas marcas</h2><a href="#/prs" class="small">Ver todas</a></div>
+      <div class="card-head"><h2>Últimas marcas</h2><a href="#prs" class="small">Ver todas</a></div>
       ${recent.length ? `<ul class="list">${recent.map((p) => `<li class="mov" data-mov="${esc(p.movement)}"><div class="grow"><div class="title">${esc(p.movement)}</div><div class="muted small">${fmtShort(p.date)}${p.classTime ? ' · ' + p.classTime : ''}</div></div><div class="best">${esc(prLabel(p))}</div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0">Registre seu primeiro PR na aba 🏆 PRs.</p>'}
     </div>
     <div class="card"><a class="ig" href="${GYM.instagram}" target="_blank" rel="noopener"><div class="ig-ico">📷</div><div class="grow"><b>@crossvenomworkout</b><div class="muted small">Siga a equipe no Instagram</div></div><span class="venom">↗</span></a></div>`;
