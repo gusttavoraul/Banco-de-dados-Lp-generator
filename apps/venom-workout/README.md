@@ -45,7 +45,7 @@ Para mudar horários, temas ou datas sem aula, editar `GYM` em `data.js` (na fas
 
 ## Pendências
 
-- [ ] **Arquivo original do logo** (PNG em alta). O escudo atual foi redesenhado a partir do cronograma; para trocar, substitua `icons/logo-512.png`, `icons/icon-512.png` e `icons/icon-192.png` (ou edite `icons/logo-source.html` e rode `node scripts/gerar-icones.js`)
+- [x] Logo oficial aplicado (`icons/logo-original.png`, 240 px). Para a Play Store, conseguir o arquivo em alta (512 px ou mais) e regerar `icons/logo-512.png`, `icons/icon-192.png` e `icons/icon-512.png`
 - [ ] Temas da semana mudam toda semana? Se sim, passar a edição dos temas para o painel do coach
 - [ ] Sábado tem aula fora de semana de campeonato?
 
@@ -66,6 +66,5 @@ apps/venom-workout/
 ├── app.js                # lógica (auth, agenda, PRs, feed, perfil, coach)
 ├── sw.js                 # cache offline
 ├── manifest.webmanifest  # config de instalação PWA
-├── scripts/gerar-icones.js # gera os PNGs do escudo
-└── icons/                # escudo (logo-512) + ícones do app (192/512)
+└── icons/                # logo oficial (original + versão transparente) e ícones do app (192/512)
 ```
