@@ -2,6 +2,8 @@
 
 App da equipe **Venom Workout** (Cross Training · Skyfit Mogi das Cruzes) — [@crossvenomworkout](https://www.instagram.com/crossvenomworkout/).
 
+**No ar:** https://venomworkout.netlify.app (Netlify, publicado manualmente pelo zip desta pasta).
+
 > **Status: rascunho v0.2.** Funciona 100% no navegador, sem servidor. Os dados ficam salvos no próprio aparelho (localStorage + IndexedDB). Ainda não sincroniza entre usuários.
 
 ## Como abrir
