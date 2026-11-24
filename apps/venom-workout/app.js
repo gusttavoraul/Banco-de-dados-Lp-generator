@@ -100,15 +100,22 @@ const userById = (id) => users().find((u) => u.id === id);
 const saveUser = (u) => { const all = users(); const i = all.findIndex((x) => x.id === u.id); if (i >= 0) all[i] = u; else all.push(u); db.set('users', all); if (me && me.id === u.id) me = u; };
 
 async function seed() {
-  if (db.get('seeded')) return;
+  if (!db.get('seeded')) await seedBase();
+  if (!db.get('seeded_v3')) seedClasses();
+}
+// exemplo: treino aberto na próxima aula e treino surpresa na seguinte
+function seedClasses() {
+  const up = nextClasses(2);
+  const all = db.get('classes', {});
+  if (up[0]) all[`${up[0].date}|${up[0].time}`] = { title: classType(up[0].time, up[0].date), wod: 'Força: Back Squat 5x5 @75%\n\nMetcon — "Venom 15"\nAMRAP 15 min:\n10 Wall Balls (9/6 kg)\n10 Toes-to-Bar\n200 m Corrida', surprise: false, updated: Date.now() };
+  if (up[1]) all[`${up[1].date}|${up[1].time}`] = { title: classType(up[1].time, up[1].date), wod: 'Hero WOD "DT"\n5 rounds for time:\n12 Deadlift (70/47 kg)\n9 Hang Power Clean\n6 Push Jerk', surprise: true, reveal: 'class', revealed: false, updated: Date.now() };
+  db.set('classes', all);
+  db.set('seeded_v3', true);
+}
+async function seedBase() {
   const coach = { id: 'coach', name: 'Karrasco', email: 'coach@venom.com', pass: await hash('venom123'), role: 'coach', level: 'Coach', phone: '', created: Date.now() };
   const demo = { id: 'demo', name: 'Atleta Demo', email: 'atleta@venom.com', pass: await hash('venom123'), role: 'athlete', level: 'Intermediário', phone: '', created: Date.now() };
   db.set('users', [coach, demo]);
-  db.set('wod', {
-    date: today(),
-    title: 'WOD do dia',
-    text: 'Força: Back Squat 5x5 @75%\n\nMetcon — "Venom 15"\nAMRAP 15 min:\n10 Wall Balls (9/6 kg)\n10 Toes-to-Bar\n200 m Corrida'
-  });
   const t = Date.now();
   db.set('posts', [{
     id: uid(), userId: 'coach', created: t - 3600e3 * 5, date: today(), classTime: '07:00', kind: 'WOD',
@@ -250,10 +257,66 @@ function route() {
 // próximo da fila é confirmado automaticamente e recebe um aviso.
 // ---------------------------------------------------------------------
 const bookings = () => db.get('bookings', []);
-const closureFor = (date) => (GYM.closures || {})[date] || null;
-const upcomingClosures = (days = 7) => Object.entries(GYM.closures || {}).filter(([d]) => { const diff = (parseDate(d) - parseDate(today())) / 864e5; return diff >= 0 && diff <= days; }).sort();
-const slotsFor = (date) => (closureFor(date) ? [] : GYM.schedule[parseDate(date).getDay()] || []);
-const classType = (time, date) => { const d = date ? parseDate(date).getDay() : null; const c = GYM.classTypes; return c[`${d}|${time}`] || c[d] || c.default; };
+// ---------- grade de horários (o coach edita no painel) ----------
+const baseSchedule = () => db.get('schedule_base', GYM.schedule);   // grade semanal fixa
+const extraClasses = () => db.get('schedule_extra', {});            // aulas avulsas: { 'AAAA-MM-DD': ['09:00'] }
+const removedClasses = () => db.get('schedule_removed', {});        // aulas da grade removidas num dia
+const closures = () => Object.fromEntries(Object.entries({ ...(GYM.closures || {}), ...db.get('closures', {}) }).filter(([, m]) => m));
+const closureFor = (date) => closures()[date] || null;
+const normTime = (s) => { const m = String(s).trim().match(/^(\d{1,2})[:h](\d{2})$/); if (!m || +m[1] > 23 || +m[2] > 59) return null; return `${pad(+m[1])}:${m[2]}`; };
+const sortTimes = (list) => [...new Set(list)].sort();
+const nextClasses = (n = 5) => {
+  const out = [];
+  for (let i = 0; i < 21 && out.length < n; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i); const ds = isoDate(d);
+    for (const t of slotsFor(ds)) if (classDateTime(ds, t) > Date.now() - 60 * 60e3 && out.length < n) out.push({ date: ds, time: t });
+  }
+  return out;
+};
+// conteúdo de cada aula: tema, treino e capa surpresa
+const classInfo = (date, time) => db.get('classes', {})[`${date}|${time}`] || null;
+const saveClassInfo = (date, time, info) => { const all = db.get('classes', {}); if (info) all[`${date}|${time}`] = { ...info, updated: Date.now() }; else delete all[`${date}|${time}`]; db.set('classes', all); };
+const isRevealed = (ci, date, time) => !ci || !ci.surprise || ci.revealed || (ci.reveal === 'class' && Date.now() >= classDateTime(date, time));
+const upcomingClosures = (days = 7) => Object.entries(closures()).filter(([d]) => { const diff = (parseDate(d) - parseDate(today())) / 864e5; return diff >= 0 && diff <= days; }).sort();
+const slotsFor = (date) => {
+  if (closureFor(date)) return [];
+  const removed = removedClasses()[date] || [];
+  const base = (baseSchedule()[parseDate(date).getDay()] || []).filter((t) => !removed.includes(t));
+  return sortTimes([...base, ...(extraClasses()[date] || [])]);
+};
+const defaultType = (time, date) => { const d = date ? parseDate(date).getDay() : null; const c = GYM.classTypes; return c[`${d}|${time}`] || c[d] || c.default; };
+const classType = (time, date) => { const ci = date && classInfo(date, time); return (ci && ci.title) || defaultType(time, date); };
+
+// bloco do treino: mostra o treino, a capa surpresa ou "ainda não publicado"
+function workoutBlock(date, time) {
+  const ci = classInfo(date, time);
+  if (!ci || !ci.wod) return `<p class="muted small" style="margin:0">O coach ${esc(GYM.coach)} ainda não publicou o treino desta aula.</p>`;
+  if (!isRevealed(ci, date, time)) {
+    if (me.role === 'coach') return `<span class="chip warn">🤫 Surpresa: os alunos ainda não veem</span><div class="wod">${esc(ci.wod)}</div>`;
+    return `<div class="surprise"><div class="q">?</div><b>TREINO SURPRESA 🤫</b><span>${ci.reveal === 'class' ? `Revelado às ${time}, quando a aula começar.` : `O coach ${esc(GYM.coach)} vai revelar na hora certa.`}</span></div>`;
+  }
+  return `<div class="wod" style="margin:0">${esc(ci.wod)}</div>`;
+}
+const surpriseHidden = (date, time) => { const ci = classInfo(date, time); return !!(ci && ci.wod && !isRevealed(ci, date, time)); };
+
+// cancela agendamentos de aulas que deixaram de existir e avisa os alunos
+function cancelOrphans(reason) {
+  const all = bookings(); let n = 0;
+  all.forEach((b) => {
+    if (b.status === 'cancelled' || classDateTime(b.date, b.time) < Date.now()) return;
+    if (slotsFor(b.date).includes(b.time)) return;
+    b.status = 'cancelled'; b.cancelledAt = Date.now(); b.cancelledBy = 'coach'; n++;
+    pushInbox(b.userId, `❌ A aula de ${fmtDate(b.date)} às ${b.time} foi cancelada pelo coach${reason ? ': ' + reason : ''}. Escolha outro horário na agenda.`);
+  });
+  if (n) db.set('bookings', all);
+  return n;
+}
+function showClass(date, time) {
+  const cap = capacityFor(date, time); const occ = occupancy(date, time);
+  openModal(`<div class="card-head"><div><span class="chip gray">${fmtDate(date)} · ${time}</span><h2 style="margin-top:6px">${esc(classType(time, date))}</h2></div><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+    <p class="muted small" style="margin-top:0">Coach ${esc(GYM.coach)} · ${occ}/${cap} vagas preenchidas</p>
+    ${workoutBlock(date, time)}`);
+}
 const coachFor = () => GYM.coach;
 // limite de vagas: padrão geral + exceção por dia da semana/horário (definidos pelo coach)
 const capSettings = () => db.get('capacity', { default: GYM.capacity, overrides: {} });
@@ -332,10 +395,11 @@ function viewAgenda(v) {
         : `<span class="chip">${STATUS_LABEL[st]} · ${positionOf(mine)}º</span>`) : '';
       return `<div class="slot ${mine ? 'mine' : ''}" style="${past && !mine ? 'opacity:.5' : ''}">
         <div class="time">${t}</div>
-        <div class="info">
-          <div style="font-weight:600">${esc(classType(t, agendaDay))} ${myTag}</div>
+        <div class="info" data-class="${t}" role="button" tabindex="0" style="cursor:pointer">
+          <div style="font-weight:600">${esc(classType(t, agendaDay))} ${myTag} ${surpriseHidden(agendaDay, t) ? '<span class="chip">🤫 Surpresa</span>' : ''}</div>
           <div class="muted small">${occ}/${cap} vagas ${full ? '· <b style="color:var(--danger)">lotada</b>' : `· ${cap - occ} livre(s)`}${wait ? ` · ${wait} na fila` : ''}</div>
           <div class="bar ${full ? 'full' : ''}"><i style="width:${cap ? (occ / cap) * 100 : 100}%"></i></div>
+          <div class="small venom" style="margin-top:6px">Ver treino ›</div>
         </div>
         ${action}
       </div>`;
@@ -349,6 +413,7 @@ function viewAgenda(v) {
   $$('[data-book]', v).forEach((b) => b.onclick = () => { book(agendaDay, b.dataset.book); viewAgenda(v); });
   $$('[data-cancel]', v).forEach((b) => b.onclick = () => { cancelBooking(b.dataset.cancel); viewAgenda(v); });
   $$('[data-checkin]', v).forEach((b) => b.onclick = () => { checkin(b.dataset.checkin); viewAgenda(v); });
+  $$('[data-class]', v).forEach((el) => { el.onclick = () => showClass(agendaDay, el.dataset.class); el.onkeydown = (e) => { if (e.key === 'Enter') showClass(agendaDay, el.dataset.class); }; });
   $('.day.on', v)?.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
 
@@ -657,7 +722,9 @@ function viewHome(v) {
   const monthClasses = bookings().filter((b) => b.userId === me.id && b.date.startsWith(month) && ['booked', 'checkin'].includes(statusOf(b))).length;
   const mine = prs().filter((p) => p.userId === me.id);
   const recent = [...mine].sort((a, b) => b.created - a.created).slice(0, 4);
-  const wod = db.get('wod', null);
+  const ref = next || nextClasses(1)[0];
+  const refInfo = ref && classInfo(ref.date, ref.time);
+  const canLog = ref && refInfo && refInfo.wod && isRevealed(refInfo, ref.date, ref.time);
   v.innerHTML = `
     <p class="muted" style="margin:0 0 2px">${greet},</p>
     <h2 style="font-size:34px;margin-bottom:14px">${esc(first)} <span class="venom">⚡</span></h2>
@@ -666,7 +733,7 @@ function viewHome(v) {
         <div class="big">${fmtDate(next.date)} · <span class="venom">${next.time}</span></div>
         <div class="muted small" style="margin-bottom:12px">${esc(classType(next.time, next.date))} · ${esc(GYM.name)} ${statusOf(next) === 'waitlist' ? `· <span class="chip warn">${positionOf(next)}º na fila</span>` : ''}</div>
         <a class="btn sm" href="#agenda">Ver agenda</a>`
-      : `<span class="muted small">NENHUMA AULA AGENDADA</span><div class="big">Bora treinar?</div><p class="muted small">Garanta sua vaga na turma.</p><a class="btn sm" href="#/agenda">Agendar aula</a>`}
+      : `<span class="muted small">NENHUMA AULA AGENDADA</span><div class="big">Bora treinar?</div><p class="muted small">Garanta sua vaga na turma.</p><a class="btn sm" href="#agenda">Agendar aula</a>`}
     </div>
     <div class="stats">
       <div class="stat"><b>${monthClasses}</b><span>Aulas no mês</span></div>
@@ -674,15 +741,16 @@ function viewHome(v) {
       <div class="stat"><b>${weekStreak()}</b><span>Semanas seguidas</span></div>
     </div>
     ${upcomingClosures().map(([d, msg]) => `<div class="card" style="border-color:rgba(255,194,61,.4)"><span class="chip warn">Aviso</span><div style="font-weight:600;margin-top:6px">${fmtDate(d)} — ${esc(msg)}</div></div>`).join('')}
-    ${wod ? `<div class="card"><div class="card-head"><h2>${esc(wod.title || 'WOD do dia')}</h2><span class="chip gray">${fmtShort(wod.date)}</span></div><div class="wod" style="margin:0">${esc(wod.text)}</div>
-      <button class="btn ghost sm" style="margin-top:12px" id="log-wod">Registrar meu resultado</button></div>` : ''}
+    ${ref ? `<div class="card"><div class="card-head"><div><h2 style="margin:0">${next ? 'Treino da sua aula' : 'Próximo treino'}</h2><span class="muted small">${fmtDate(ref.date)} · ${ref.time} · ${esc(classType(ref.time, ref.date))}</span></div></div>
+      ${workoutBlock(ref.date, ref.time)}
+      ${canLog ? '<button class="btn ghost sm" style="margin-top:12px" id="log-wod">Registrar meu resultado</button>' : ''}</div>` : ''}
     <div class="card">
       <div class="card-head"><h2>Últimas marcas</h2><a href="#prs" class="small">Ver todas</a></div>
       ${recent.length ? `<ul class="list">${recent.map((p) => `<li class="mov" data-mov="${esc(p.movement)}"><div class="grow"><div class="title">${esc(p.movement)}</div><div class="muted small">${fmtShort(p.date)}${p.classTime ? ' · ' + p.classTime : ''}</div></div><div class="best">${esc(prLabel(p))}</div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0">Registre seu primeiro PR na aba 🏆 PRs.</p>'}
     </div>
     <div class="card"><a class="ig" href="${GYM.instagram}" target="_blank" rel="noopener"><div class="ig-ico">📷</div><div class="grow"><b>@crossvenomworkout</b><div class="muted small">Siga a equipe no Instagram</div></div><span class="venom">↗</span></a></div>`;
   $$('[data-mov]', v).forEach((li) => li.onclick = () => showMovement(li.dataset.mov));
-  $('#log-wod', v)?.addEventListener('click', () => { postForm(); const f = $('#post-form'); f.wod.value = wod.text; });
+  $('#log-wod', v)?.addEventListener('click', () => { postForm(); const f = $('#post-form'); f.wod.value = refInfo.wod; f.date.value = ref.date <= today() ? ref.date : today(); f.date.dispatchEvent(new Event('change')); f.classTime.value = ref.time; });
 }
 
 // =====================================================================
@@ -705,7 +773,8 @@ function viewPerfil(v) {
     <button class="btn ghost" id="edit" style="margin-top:14px">Editar perfil</button></div>
 
     ${me.role === 'coach' ? `<div class="card"><h2>Painel do Coach</h2>
-      <button class="btn" id="edit-wod">Publicar WOD do dia</button>
+      <button class="btn" id="classes">Aulas e treinos</button>
+      <button class="btn ghost" id="weekly" style="margin-top:8px">Grade semanal de horários</button>
       <button class="btn ghost" id="capacity" style="margin-top:8px">Limite de vagas por aula</button>
       <button class="btn ghost" id="roster" style="margin-top:8px">Lista de alunos por turma</button></div>` : ''}
 
@@ -718,7 +787,7 @@ function viewPerfil(v) {
 
     <div class="card"><a class="ig" href="${GYM.instagram}" target="_blank" rel="noopener"><div class="ig-ico">📷</div><div class="grow"><b>@crossvenomworkout</b><div class="muted small">${esc(GYM.name)}</div></div><span class="venom">↗</span></a></div>
     <button class="btn danger" id="logout">Sair da conta</button>
-    <p class="hint">Venom Workout · versão 0.1 (rascunho)</p>`;
+    <p class="hint">Venom Workout · versão 0.3 (rascunho)</p>`;
 
   $('#av', v).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; me.photo = await compressImage(f, 256, 0.8); saveUser(me); route(); };
   $$('[data-s]', v).forEach((i) => i.onchange = () => { s[i.dataset.s] = i.checked; db.set('settings_' + me.id, s); if (i.dataset.s === 'remind' && i.checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); });
@@ -737,19 +806,15 @@ function viewPerfil(v) {
     $('#e-save', sh).onclick = () => { me.name = $('#e-name', sh).value.trim() || me.name; me.phone = $('#e-phone', sh).value.trim(); me.level = $('#e-level', sh).value; me.bodyweight = $('#e-bw', sh).value; me.height = $('#e-h', sh).value; saveUser(me); closeModal(); toast('Perfil atualizado.'); route(); };
   });
   if (me.role === 'coach') {
-    $('#edit-wod', v).onclick = () => { const w = db.get('wod', { title: 'WOD do dia', text: '' }); openModal(`<h2>WOD do dia</h2>
-      <label class="field"><span>Título</span><input class="input" id="w-title" value="${esc(w.title)}"></label>
-      <label class="field"><span>Treino</span><textarea class="input" id="w-text" style="min-height:180px">${esc(w.text)}</textarea></label>
-      <button class="btn" id="w-save">Publicar</button>`, (sh) => {
-      $('#w-save', sh).onclick = () => { db.set('wod', { date: today(), title: $('#w-title', sh).value.trim() || 'WOD do dia', text: $('#w-text', sh).value }); closeModal(); toast('WOD publicado para a equipe!'); };
-    }); };
+    $('#classes', v).onclick = () => coachClasses((nextClasses(1)[0] || { date: today() }).date);
+    $('#weekly', v).onclick = weeklyEditor;
     $('#capacity', v).onclick = () => {
       const c = capSettings();
-      const days = [1, 2, 3, 4, 5, 6, 0].filter((d) => (GYM.schedule[d] || []).length);
+      const days = [1, 2, 3, 4, 5, 6, 0].filter((d) => (baseSchedule()[d] || []).length);
       openModal(`<h2>Limite de vagas</h2><p class="muted">Quem agendar primeiro garante a vaga. Passou do limite, o aluno entra na fila de espera.</p>
         <label class="field"><span>Limite padrão (todas as aulas)</span><input class="input" id="cap-def" type="number" min="1" max="200" value="${c.default}" inputmode="numeric"></label>
         <h3 class="group-title">Exceções por horário <span class="muted small">(vazio = padrão)</span></h3>
-        ${days.map((d) => `<div class="card" style="padding:10px 14px"><b>${WEEK_FULL[d]}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${GYM.schedule[d].map((t) => `<label class="field" style="flex:0 0 calc(33% - 8px);margin:0 0 6px"><span>${t}</span><input class="input" data-ov="${d}|${t}" type="number" min="0" max="200" value="${c.overrides[d + '|' + t] ?? ''}" placeholder="${c.default}" inputmode="numeric" style="padding:9px 8px"></label>`).join('')}</div></div>`).join('')}
+        ${days.map((d) => `<div class="card" style="padding:10px 14px"><b>${WEEK_FULL[d]}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${baseSchedule()[d].map((t) => `<label class="field" style="flex:0 0 calc(33% - 8px);margin:0 0 6px"><span>${t}</span><input class="input" data-ov="${d}|${t}" type="number" min="0" max="200" value="${c.overrides[d + '|' + t] ?? ''}" placeholder="${c.default}" inputmode="numeric" style="padding:9px 8px"></label>`).join('')}</div></div>`).join('')}
         <button class="btn" id="cap-save">Salvar limites</button>`, (sh) => {
         $('#cap-save', sh).onclick = () => {
           const def = parseInt($('#cap-def', sh).value, 10);
@@ -781,6 +846,98 @@ function viewPerfil(v) {
   }
 }
 
+// ---------- painel do coach: aulas e treinos de um dia ----------
+const notifyBooked = (date, time, text) => queueAt(date, time).forEach((b) => pushInbox(b.userId, text));
+function coachClasses(date) {
+  const slots = slotsFor(date); const closed = closureFor(date);
+  openModal(`<div class="card-head"><h2>Aulas e treinos</h2><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+    <label class="field"><span>Dia</span><input class="input" type="date" id="cc-day" value="${date}"></label>
+    ${closed ? `<div class="card"><span class="chip warn">Sem aula</span><p style="margin:8px 0 12px">${esc(closed)}</p><button class="btn ghost sm" id="cc-reopen">Reabrir o dia</button></div>` : `
+    ${slots.map((t) => { const ci = classInfo(date, t); const hidden = ci && ci.wod && !isRevealed(ci, date, t); return `<div class="card">
+      <div class="card-head"><div><b class="display" style="font-size:24px">${t}</b> <span style="font-weight:600">${esc(classType(t, date))}</span></div><span class="chip gray">${queueAt(date, t).length} agend.</span></div>
+      <div class="small" style="margin-bottom:10px">${!ci || !ci.wod ? '<span class="chip red">Sem treino</span>' : hidden ? `<span class="chip warn">🤫 Surpresa · ${ci.reveal === 'class' ? 'revela na hora da aula' : 'revelação manual'}</span>` : '<span class="chip">Treino visível</span>'}</div>
+      ${ci && ci.wod ? `<div class="wod" style="max-height:84px;overflow:hidden">${esc(ci.wod)}</div>` : ''}
+      <div class="row" style="flex-wrap:wrap;margin-top:8px"><button class="btn sm" data-edit="${t}">Editar</button>${hidden ? `<button class="btn sm ghost" data-reveal="${t}">🔓 Revelar agora</button>` : ''}<button class="btn sm danger" data-remove="${t}">Remover aula</button></div>
+    </div>`; }).join('') || emptyState('😴', 'Nenhuma aula neste dia.')}
+    <div class="card"><h3 class="display" style="font-size:20px;margin-bottom:8px">Adicionar aula neste dia</h3>
+      <div class="row"><input class="input" type="time" id="cc-time" value="09:00"><button class="btn sm" id="cc-add">Adicionar</button></div>
+      <p class="muted small" style="margin-bottom:0">Use para sábados, aulões e horários extras.</p></div>
+    ${slots.length ? '<button class="btn danger" id="cc-close">Cancelar todas as aulas do dia</button>' : ''}`}`, (s) => {
+    $('#cc-day', s).onchange = (e) => e.target.value && coachClasses(e.target.value);
+    $('#cc-reopen', s)?.addEventListener('click', () => { const c = db.get('closures', {}); c[date] = null; db.set('closures', c); toast('Dia reaberto.'); coachClasses(date); });
+    $('#cc-add', s)?.addEventListener('click', () => {
+      const t = normTime($('#cc-time', s).value); if (!t) return toast('Horário inválido. Use HH:MM.');
+      if (slotsFor(date).includes(t)) return toast('Já existe aula nesse horário.');
+      const rm = removedClasses(); if ((rm[date] || []).includes(t)) { rm[date] = rm[date].filter((x) => x !== t); db.set('schedule_removed', rm); }
+      if (!slotsFor(date).includes(t)) { const ex = extraClasses(); ex[date] = sortTimes([...(ex[date] || []), t]); db.set('schedule_extra', ex); }
+      toast(`Aula das ${t} adicionada em ${fmtDate(date)}.`); coachClasses(date);
+    });
+    $('#cc-close', s)?.addEventListener('click', () => {
+      const n = slots.reduce((acc, t) => acc + queueAt(date, t).length, 0);
+      openModal(`<h2>Cancelar o dia</h2><p class="muted">${fmtDate(date)}${n ? ` · ${n} aluno(s) agendado(s) serão avisados` : ''}.</p>
+        <label class="field"><span>Motivo (aparece para os alunos)</span><input class="input" id="cl-msg" value="Não haverá aula"></label>
+        <div class="row"><button class="btn ghost" id="cl-no">Voltar</button><button class="btn danger" id="cl-yes">Cancelar aulas</button></div>`, (sh) => {
+        $('#cl-no', sh).onclick = () => coachClasses(date);
+        $('#cl-yes', sh).onclick = () => { const msg = $('#cl-msg', sh).value.trim() || 'Não haverá aula'; const c = db.get('closures', {}); c[date] = msg; db.set('closures', c); const k = cancelOrphans(msg); toast(`Aulas canceladas${k ? ` · ${k} aluno(s) avisado(s)` : ''}.`); coachClasses(date); };
+      });
+    });
+    $$('[data-edit]', s).forEach((b) => b.onclick = () => classEditor(date, b.dataset.edit));
+    $$('[data-reveal]', s).forEach((b) => b.onclick = () => {
+      const t = b.dataset.reveal; saveClassInfo(date, t, { ...classInfo(date, t), revealed: true });
+      notifyBooked(date, t, `🔓 O treino da aula de ${fmtDate(date)} às ${t} foi revelado! Confira na agenda.`);
+      toast('Treino revelado para os alunos.'); coachClasses(date);
+    });
+    $$('[data-remove]', s).forEach((b) => b.onclick = () => {
+      const t = b.dataset.remove; const n = queueAt(date, t).length;
+      askConfirm(`Remover a aula das ${t}?`, n ? `${n} aluno(s) agendado(s) serão avisados do cancelamento.` : 'Ninguém agendou essa aula ainda.', () => {
+        const ex = extraClasses();
+        if ((ex[date] || []).includes(t)) { ex[date] = ex[date].filter((x) => x !== t); db.set('schedule_extra', ex); }
+        else { const rm = removedClasses(); rm[date] = sortTimes([...(rm[date] || []), t]); db.set('schedule_removed', rm); }
+        saveClassInfo(date, t, null);
+        const k = cancelOrphans('aula removida'); toast(`Aula removida${k ? ` · ${k} aluno(s) avisado(s)` : ''}.`); coachClasses(date);
+      }, () => coachClasses(date));
+    });
+  });
+}
+function classEditor(date, time) {
+  const ci = classInfo(date, time) || {};
+  openModal(`<h2>${fmtDate(date)} · ${time}</h2><p class="muted" style="margin-top:0">O que os alunos veem nesta aula.</p>
+    <label class="field"><span>Tema / nome da aula</span><input class="input" id="ce-title" value="${esc(ci.title || '')}" placeholder="${esc(defaultType(time, date))}"></label>
+    <label class="field"><span>Treino</span><textarea class="input" id="ce-wod" style="min-height:170px" placeholder="Ex.: Deadly Barbell — The Clean&#10;Força: Squat Clean 5x2&#10;&#10;Metcon: 12 min AMRAP…">${esc(ci.wod || '')}</textarea></label>
+    <label class="toggle"><span><b>Treino surpresa</b><br><span class="muted small">Os alunos veem só uma capa até a revelação.</span></span><input type="checkbox" class="switch" id="ce-surprise" ${ci.surprise ? 'checked' : ''}></label>
+    <label class="field" id="ce-reveal-wrap"><span>Quando revelar</span><select class="input" id="ce-reveal"><option value="class" ${ci.reveal !== 'manual' ? 'selected' : ''}>Automaticamente, na hora da aula</option><option value="manual" ${ci.reveal === 'manual' ? 'selected' : ''}>Quando eu liberar (botão "Revelar agora")</option></select></label>
+    <label class="toggle"><span>Aplicar a todas as aulas deste dia</span><input type="checkbox" class="switch" id="ce-all"></label>
+    <div class="row"><button class="btn ghost" id="ce-back">Voltar</button><button class="btn" id="ce-save">Salvar</button></div>`, (s) => {
+    const sync = () => { $('#ce-reveal-wrap', s).hidden = !$('#ce-surprise', s).checked; };
+    $('#ce-surprise', s).onchange = sync; sync();
+    $('#ce-back', s).onclick = () => coachClasses(date);
+    $('#ce-save', s).onclick = () => {
+      const info = { title: $('#ce-title', s).value.trim(), wod: $('#ce-wod', s).value.trim(), surprise: $('#ce-surprise', s).checked, reveal: $('#ce-reveal', s).value, revealed: false };
+      const targets = $('#ce-all', s).checked ? slotsFor(date) : [time];
+      targets.forEach((t) => saveClassInfo(date, t, info));
+      toast(targets.length > 1 ? `Salvo em ${targets.length} aulas.` : 'Aula atualizada.');
+      coachClasses(date);
+    };
+  });
+}
+// grade semanal fixa
+function weeklyEditor() {
+  const base = baseSchedule();
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  openModal(`<h2>Grade semanal</h2><p class="muted" style="margin-top:0">Horários fixos de cada semana, separados por vírgula. Sábado ou aula extra num dia só? Use <b>Aulas e treinos</b>.</p>
+    ${order.map((d) => `<label class="field"><span>${WEEK_FULL[d]}</span><input class="input" data-wd="${d}" value="${(base[d] || []).join(', ')}" placeholder="sem aula"></label>`).join('')}
+    <button class="btn" id="wk-save">Salvar grade</button>`, (s) => {
+    $('#wk-save', s).onclick = () => {
+      const next = {}; let bad = null;
+      $$('[data-wd]', s).forEach((i) => { const parts = i.value.split(/[,;\s]+/).filter(Boolean); const times = parts.map(normTime); if (times.includes(null)) bad = WEEK_FULL[i.dataset.wd]; next[i.dataset.wd] = sortTimes(times.filter(Boolean)); });
+      if (bad) return toast(`Horário inválido em ${bad}. Use HH:MM, ex.: 06:00, 18:10.`);
+      db.set('schedule_base', next);
+      const k = cancelOrphans('mudança na grade de horários');
+      closeModal(); toast(`Grade salva${k ? ` · ${k} agendamento(s) cancelado(s) e avisado(s)` : ''}.`); route();
+    };
+  });
+}
+
 // =====================================================================
 // AVISOS
 // =====================================================================
@@ -791,8 +948,8 @@ function notifications() {
     const mins = (classDateTime(next.date, next.time) - Date.now()) / 60e3;
     if (mins > 0 && mins < 24 * 60) out.push(`⏰ Sua aula é ${next.date === today() ? 'hoje' : 'amanhã'} às ${next.time}.`);
   }
-  const wod = db.get('wod', null);
-  if (wod && wod.date === today()) out.push('📋 O WOD de hoje já foi publicado pelo coach.');
+  if (next && surpriseHidden(next.date, next.time)) out.push(`🤫 Sua aula de ${fmtDate(next.date)} às ${next.time} tem treino surpresa!`);
+  else if (slotsFor(today()).some((t) => { const ci = classInfo(today(), t); return ci && ci.wod && isRevealed(ci, today(), t); })) out.push('📋 O treino de hoje já está no app. Veja na agenda.');
   upcomingClosures().forEach(([d, msg]) => out.push(`📢 ${fmtDate(d)}: ${msg}`));
   const mineIds = new Set(db.get('posts', []).filter((p) => p.userId === me.id).map((p) => p.id));
   const newComments = db.get('posts', []).filter((p) => mineIds.has(p.id)).flatMap((p) => p.comments.filter((c) => c.userId !== me.id && Date.now() - c.ts < 864e5));

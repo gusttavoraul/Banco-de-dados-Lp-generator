@@ -142,7 +142,7 @@ const TYPE_LABEL = {
 };
 
 // =====================================================================
-// Grade de aulas — Skyfit Mogi das Cruzes (cronograma semanal da Venom)
+// Grade INICIAL — Skyfit Mogi das Cruzes. O coach altera tudo pelo Painel do Coach.
 // 0 = domingo ... 6 = sábado
 // =====================================================================
 const GYM = {
@@ -158,7 +158,7 @@ const GYM = {
     3: ['06:00', '07:00'],                          // quarta: manhã
     4: ['06:00', '07:00', '18:10', '19:10', '20:10'], // quinta: manhã + noite
     5: [],                                          // sexta: sem aula
-    6: []                                           // sábado: sem aula
+    6: []                                           // sábado: o coach adiciona os horários em "Aulas e treinos"
   },
   coach: 'Karrasco',
   // nome/tema da aula: 'dia|horário' > 'dia' > padrão

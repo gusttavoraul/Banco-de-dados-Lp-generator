@@ -4,7 +4,7 @@ App da equipe **Venom Workout** (Cross Training · Skyfit Mogi das Cruzes) — [
 
 **No ar:** https://venomworkout.netlify.app (Netlify, publicado manualmente pelo zip desta pasta).
 
-> **Status: rascunho v0.2.** Funciona 100% no navegador, sem servidor. Os dados ficam salvos no próprio aparelho (localStorage + IndexedDB). Ainda não sincroniza entre usuários.
+> **Status: rascunho v0.3.** Funciona 100% no navegador, sem servidor. Os dados ficam salvos no próprio aparelho (localStorage + IndexedDB). Ainda não sincroniza entre usuários.
 
 ## Como abrir
 
@@ -27,7 +27,7 @@ Contas de demonstração (senha `venom123`): `atleta@venom.com` (aluno) e `coach
 | **PRs** | 376 movimentos em 18 categorias (LPO, agachamentos, terra, ginástica, holds, cardio, calorias, The Girls, Hero WODs, Open…). Cada registro tem data, horário da aula, peso, reps / tempo / rounds, RX ou Scaled e observações. Mostra a melhor marca, o histórico, um gráfico de evolução e a tabela de % do 1RM (fórmula de Epley). Avisa quando você bate um PR novo, deixa postar no feed e criar movimentos personalizados |
 | **Treinos (feed)** | Post com foto (comprimida), tipo, WOD, resultado, RX, horário da aula e legenda. Curtir, comentar, excluir. Filtro Equipe / Meus |
 | **Perfil** | Foto, dados, peso e altura, estatísticas, lembretes, instalar o app, exportar dados (LGPD), sair |
-| **Coach** | Publicar WOD do dia, **definir limite de vagas** (padrão + exceção por horário), lista de alunos por turma em ordem de agendamento (qualquer dia) |
+| **Coach** | **Aulas e treinos**: escolhe o dia e edita tema e treino de cada aula (ou de todas do dia), liga a **capa de treino surpresa** (revela sozinha na hora da aula ou no botão "Revelar agora", e os agendados são avisados), adiciona aulas avulsas (ex.: sábado), remove aulas e cancela dias (os alunos agendados são avisados). **Grade semanal** editável. **Limite de vagas** (padrão + exceção por horário). Lista de alunos por turma em ordem de agendamento |
 | **PWA** | Instalável no celular, abre offline (service worker) |
 
 ## Grade de aulas (cronograma semanal)
@@ -39,17 +39,18 @@ Contas de demonstração (senha `venom123`): `atleta@venom.com` (aluno) e `coach
 | Quarta | 06:00 · 07:00 | Deadly Barbell — The Clean |
 | Quinta | 06:00 · 07:00 · 18:10 · 19:10 · 20:10 | Handstand Walking |
 | Domingo | 10:00 | Aulão |
+| Sábado | definido pelo coach a cada semana | — |
 | Sáb 28/11 | — | Sem aula (dia de campeonato) |
 
-Para mudar horários, temas ou datas sem aula, editar `GYM` em `data.js` (na fase 2 isso vai para o painel do coach).
+A grade acima é só a inicial: o coach muda horários, temas, treinos, aulas de sábado e dias sem aula pelo **Painel do Coach** (Perfil → Painel do Coach).
 
 **Mensalidade não passa pelo app** — ele é só para agendamento, PRs e treinos.
 
 ## Pendências
 
 - [x] Logo oficial aplicado (`icons/logo-original.png`, 240 px). Para a Play Store, conseguir o arquivo em alta (512 px ou mais) e regerar `icons/logo-512.png`, `icons/icon-192.png` e `icons/icon-512.png`
-- [ ] Temas da semana mudam toda semana? Se sim, passar a edição dos temas para o painel do coach
-- [ ] Sábado tem aula fora de semana de campeonato?
+- [x] Temas mudam toda semana: o coach edita em "Aulas e treinos", com opção de treino surpresa
+- [x] Sábado: o coach adiciona os horários em "Aulas e treinos"
 
 ## Roteiro até a Play Store
 

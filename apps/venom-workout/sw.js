@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir offline (cache dos arquivos estáticos).
-const CACHE = 'venom-v3';
+const CACHE = 'venom-v4';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './data.js', './manifest.webmanifest', './icons/logo-512.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
