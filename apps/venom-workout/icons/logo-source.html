@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Fonte do logo (escudo Venom Workout). Gera os PNGs em icons/ via scripts/gerar-icones.js.
+     Quando a equipe enviar o arquivo original do logo, basta substituir os PNGs. -->
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@600&family=Kaushan+Script&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; background: transparent; }
+  body.bg { background: #0b0b0c; }
+  svg { display: block; width: 512px; height: 512px; }
+  .cross { font-family: 'Kaushan Script', cursive; }
+  .venom { font-family: 'Anton', Impact, sans-serif; }
+  .workout { font-family: 'Oswald', sans-serif; font-weight: 600; letter-spacing: 6px; }
+</style></head>
+<body>
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <g id="shield" style="transform-origin:256px 256px">
+    <!-- escudo externo -->
+    <path d="M96 70 L136 34 L376 34 L416 70 L416 290 C416 380 340 440 256 482 C172 440 96 380 96 290 Z"
+          fill="#0b0b0c" stroke="#f4f4f4" stroke-width="14" stroke-linejoin="round"/>
+    <!-- contorno interno -->
+    <path d="M118 80 L146 56 L366 56 L394 80 L394 288 C394 366 330 418 256 456 C182 418 118 366 118 288 Z"
+          fill="none" stroke="#f4f4f4" stroke-width="4" stroke-linejoin="round"/>
+    <text x="256" y="140" text-anchor="middle" class="cross" font-size="44" fill="#f4f4f4">Cross</text>
+    <text x="256" y="268" text-anchor="middle" class="venom" font-size="118" fill="#f4f4f4" textLength="236" lengthAdjust="spacingAndGlyphs">VENOM</text>
+    <rect x="150" y="292" width="212" height="4" fill="#e3262f"/>
+    <text x="256" y="346" text-anchor="middle" class="workout" font-size="44" fill="#f4f4f4" textLength="206" lengthAdjust="spacingAndGlyphs">WORKOUT</text>
+    <rect x="150" y="364" width="212" height="4" fill="#e3262f"/>
+  </g>
+</svg>
+</body></html>

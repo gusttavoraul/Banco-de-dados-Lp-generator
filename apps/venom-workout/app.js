@@ -101,7 +101,7 @@ const saveUser = (u) => { const all = users(); const i = all.findIndex((x) => x.
 
 async function seed() {
   if (db.get('seeded')) return;
-  const coach = { id: 'coach', name: 'Coach Venom', email: 'coach@venom.com', pass: await hash('venom123'), role: 'coach', level: 'Coach', phone: '', created: Date.now() };
+  const coach = { id: 'coach', name: 'Karrasco', email: 'coach@venom.com', pass: await hash('venom123'), role: 'coach', level: 'Coach', phone: '', created: Date.now() };
   const demo = { id: 'demo', name: 'Atleta Demo', email: 'atleta@venom.com', pass: await hash('venom123'), role: 'athlete', level: 'Intermediário', phone: '', created: Date.now() };
   db.set('users', [coach, demo]);
   db.set('wod', {
@@ -155,7 +155,7 @@ function renderAuth(mode) {
   el.innerHTML = `
     <div class="auth-card">
       <div class="auth-head">
-        <img src="icons/logo.svg" alt="Venom Workout">
+        <img src="icons/logo-512.png" alt="Venom Workout">
         <h1><b>VENOM</b> WORKOUT</h1>
         <p>Cross Training · Skyfit Mogi das Cruzes</p>
       </div>
@@ -227,6 +227,7 @@ function route() {
   $('#page-title').textContent = r[0];
   $$('.tabbar a').forEach((a) => a.classList.toggle('on', a.dataset.tab === key));
   $('.fab')?.remove();
+  if (!$('#modal').hidden) closeModal();
   const v = $('#view'); v.style.animation = 'none'; v.offsetHeight; v.style.animation = '';
   r[1](v, arg && decodeURIComponent(arg));
   window.scrollTo(0, 0);
@@ -236,35 +237,62 @@ function route() {
 // =====================================================================
 // AGENDAMENTO
 // =====================================================================
+// ---------------------------------------------------------------------
+// Regra: ORDEM DE CHEGADA. Os primeiros N a agendar (N = limite da turma)
+// ficam confirmados; os demais entram na fila. Se alguém cancela, o
+// próximo da fila é confirmado automaticamente e recebe um aviso.
+// ---------------------------------------------------------------------
 const bookings = () => db.get('bookings', []);
-const slotsFor = (date) => GYM.schedule[parseDate(date).getDay()] || [];
-const classType = (time) => GYM.classTypes[time] || GYM.classTypes.default;
-const coachFor = (date, time) => GYM.coaches[(parseDate(date).getDate() + parseInt(time, 10)) % GYM.coaches.length];
-// ocupação simulada de outros alunos (some quando houver backend)
-const simulated = (date, time) => { let h = 0; for (const c of date + time) h = (h * 33 + c.charCodeAt(0)) >>> 0; return h % (GYM.capacity - 3); };
-const activeAt = (date, time) => bookings().filter((b) => b.date === date && b.time === time && b.status !== 'cancelled');
-const occupancy = (date, time) => {
-  const list = activeAt(date, time).filter((b) => b.status !== 'waitlist');
-  return Math.min(GYM.capacity, simulated(date, time) + list.length);
+const closureFor = (date) => (GYM.closures || {})[date] || null;
+const upcomingClosures = (days = 7) => Object.entries(GYM.closures || {}).filter(([d]) => { const diff = (parseDate(d) - parseDate(today())) / 864e5; return diff >= 0 && diff <= days; }).sort();
+const slotsFor = (date) => (closureFor(date) ? [] : GYM.schedule[parseDate(date).getDay()] || []);
+const classType = (time, date) => { const d = date ? parseDate(date).getDay() : null; const c = GYM.classTypes; return c[`${d}|${time}`] || c[d] || c.default; };
+const coachFor = () => GYM.coach;
+// limite de vagas: padrão geral + exceção por dia da semana/horário (definidos pelo coach)
+const capSettings = () => db.get('capacity', { default: GYM.capacity, overrides: {} });
+const capacityFor = (date, time) => { const c = capSettings(); const o = c.overrides[`${parseDate(date).getDay()}|${time}`]; return o != null ? o : c.default; };
+// fila da turma em ordem de agendamento
+const queueAt = (date, time) => bookings().filter((b) => b.date === date && b.time === time && b.status !== 'cancelled').sort((a, b) => a.created - b.created);
+const statusOf = (b) => {
+  if (b.status === 'cancelled' || b.status === 'checkin') return b.status;
+  const q = queueAt(b.date, b.time); const i = q.findIndex((x) => x.id === b.id);
+  return i < capacityFor(b.date, b.time) ? 'booked' : 'waitlist';
 };
+const positionOf = (b) => { const q = queueAt(b.date, b.time); const i = q.findIndex((x) => x.id === b.id); const cap = capacityFor(b.date, b.time); return i < cap ? i + 1 : i - cap + 1; };
+const occupancy = (date, time) => Math.min(capacityFor(date, time), queueAt(date, time).length);
+const waitCount = (date, time) => Math.max(0, queueAt(date, time).length - capacityFor(date, time));
+const STATUS_LABEL = { booked: 'Confirmada', waitlist: 'Fila de espera', checkin: 'Check-in' };
 const myBooking = (date, time) => bookings().find((b) => b.userId === me.id && b.date === date && b.time === time && b.status !== 'cancelled');
 const myUpcoming = () => bookings().filter((b) => b.userId === me.id && b.status !== 'cancelled' && classDateTime(b.date, b.time) > Date.now() - 60 * 60e3)
   .sort((a, b) => classDateTime(a.date, a.time) - classDateTime(b.date, b.time));
 
+// avisos individuais (ex.: "você saiu da fila e está confirmado")
+const pushInbox = (userId, text) => { const k = 'inbox_' + userId; const box = db.get(k, []); box.unshift({ text, ts: Date.now() }); db.set(k, box.slice(0, 30)); };
+const confirmedIds = (date, time) => new Set(queueAt(date, time).filter((b) => statusOf(b) !== 'waitlist').map((b) => b.id));
+const notifyPromoted = (date, time, before) => {
+  queueAt(date, time).forEach((b) => { if (!before.has(b.id) && statusOf(b) === 'booked') pushInbox(b.userId, `✅ Abriu vaga! Você saiu da fila e está confirmado(a) na aula de ${fmtDate(date)} às ${time}.`); });
+};
+
 function book(date, time) {
   const all = bookings();
-  if (all.some((b) => b.userId === me.id && b.date === date && b.status !== 'cancelled' && b.status !== 'waitlist')) return toast('Você já tem uma aula agendada nesse dia.');
-  const full = occupancy(date, time) >= GYM.capacity;
-  all.push({ id: uid(), userId: me.id, date, time, status: full ? 'waitlist' : 'booked', created: Date.now() });
+  if (all.some((b) => b.userId === me.id && b.date === date && b.status !== 'cancelled')) return toast('Você já tem um agendamento nesse dia.');
+  all.push({ id: uid(), userId: me.id, date, time, status: 'booked', created: Date.now() });
   db.set('bookings', all);
-  toast(full ? 'Aula lotada — você entrou na lista de espera.' : `Aula agendada: ${fmtDate(date)} às ${time} ✅`);
+  const mine = myBooking(date, time);
+  toast(statusOf(mine) === 'waitlist'
+    ? `Turma lotada — você é o ${positionOf(mine)}º da fila de espera.`
+    : `Vaga garantida: ${fmtDate(date)} às ${time} ✅ (${positionOf(mine)}º a agendar)`);
 }
 function cancelBooking(id) {
   const all = bookings(); const b = all.find((x) => x.id === id); if (!b) return;
+  const st = statusOf(b);
   const minsLeft = (classDateTime(b.date, b.time) - Date.now()) / 60e3;
-  if (b.status === 'booked' && minsLeft < GYM.cancelLimitMin) return toast(`Cancelamento só até ${GYM.cancelLimitMin} min antes da aula.`);
+  if (st === 'booked' && minsLeft < GYM.cancelLimitMin) return toast(`Cancelamento só até ${GYM.cancelLimitMin} min antes da aula.`);
+  const before = confirmedIds(b.date, b.time);
   b.status = 'cancelled'; b.cancelledAt = Date.now();
-  db.set('bookings', all); toast('Agendamento cancelado.');
+  db.set('bookings', all);
+  notifyPromoted(b.date, b.time, before);
+  toast(st === 'waitlist' ? 'Você saiu da fila de espera.' : 'Agendamento cancelado. A vaga foi para o próximo da fila.');
 }
 function checkin(id) {
   const all = bookings(); const b = all.find((x) => x.id === id); if (!b) return;
@@ -278,33 +306,37 @@ function viewAgenda(v) {
   const slots = slotsFor(agendaDay);
   const now = Date.now();
   v.innerHTML = `
-    <div class="card-head"><div><h2 style="font-size:24px">${GYM.name}</h2><span class="muted small">Cross Training · ${GYM.capacity} vagas por turma</span></div></div>
-    <div class="days">${days.map((d) => { const dt = parseDate(d); return `<button class="day ${d === agendaDay ? 'on' : ''} ${slotsFor(d).length ? '' : 'closed'}" data-d="${d}"><small>${WEEK[dt.getDay()]}</small><b>${dt.getDate()}</b></button>`; }).join('')}</div>
+    <div class="card-head"><div><h2 style="font-size:24px">${GYM.name}</h2><span class="muted small">Cross Training · Coach ${esc(GYM.coach)} · vagas por ordem de agendamento</span></div></div>
+    <div class="days">${days.map((d) => { const dt = parseDate(d); return `<button class="day ${d === agendaDay ? 'on' : ''} ${slotsFor(d).length ? '' : 'closed'} ${closureFor(d) ? 'event' : ''}" data-d="${d}"><small>${WEEK[dt.getDay()]}</small><b>${dt.getDate()}</b></button>`; }).join('')}</div>
     <h3 class="group-title">${WEEK_FULL[parseDate(agendaDay).getDay()]}, ${parseDate(agendaDay).getDate()} de ${MONTH[parseDate(agendaDay).getMonth()]}</h3>
     ${slots.length ? slots.map((t) => {
       const start = classDateTime(agendaDay, t); const past = start < now;
-      const occ = occupancy(agendaDay, t); const full = occ >= GYM.capacity; const mine = myBooking(agendaDay, t);
+      const cap = capacityFor(agendaDay, t); const occ = occupancy(agendaDay, t); const full = occ >= cap; const wait = waitCount(agendaDay, t);
+      const mine = myBooking(agendaDay, t); const st = mine && statusOf(mine);
       const minsLeft = (start - now) / 60e3;
       let action;
-      if (mine && mine.status === 'checkin') action = '<span class="chip">Check-in ✓</span>';
-      else if (mine && mine.status === 'booked' && minsLeft <= 30 && minsLeft > -60) action = `<button class="btn sm" data-checkin="${mine.id}">Check-in</button>`;
-      else if (mine) action = `<button class="btn sm danger" data-cancel="${mine.id}">${mine.status === 'waitlist' ? 'Sair da espera' : 'Cancelar'}</button>`;
+      if (st === 'checkin') action = '<span class="chip">Check-in ✓</span>';
+      else if (st === 'booked' && minsLeft <= 30 && minsLeft > -60) action = `<button class="btn sm" data-checkin="${mine.id}">Check-in</button>`;
+      else if (mine && !past) action = `<button class="btn sm danger" data-cancel="${mine.id}">${st === 'waitlist' ? 'Sair da fila' : 'Cancelar'}</button>`;
       else if (past) action = '<span class="chip gray">Encerrada</span>';
-      else action = `<button class="btn sm ${full ? 'ghost' : ''}" data-book="${t}">${full ? 'Lista de espera' : 'Agendar'}</button>`;
+      else action = `<button class="btn sm ${full ? 'ghost' : ''}" data-book="${t}">${full ? 'Entrar na fila' : 'Agendar'}</button>`;
+      const myTag = mine ? (st === 'waitlist'
+        ? `<span class="chip warn">${positionOf(mine)}º na fila</span>`
+        : `<span class="chip">${STATUS_LABEL[st]} · ${positionOf(mine)}º</span>`) : '';
       return `<div class="slot ${mine ? 'mine' : ''}" style="${past && !mine ? 'opacity:.5' : ''}">
         <div class="time">${t}</div>
         <div class="info">
-          <div style="font-weight:600">${esc(classType(t))} ${mine ? `<span class="chip ${mine.status === 'waitlist' ? 'warn' : ''}">${mine.status === 'waitlist' ? 'Na espera' : 'Agendada'}</span>` : ''}</div>
-          <div class="muted small">${esc(coachFor(agendaDay, t))} · ${occ}/${GYM.capacity} atletas</div>
-          <div class="bar ${full ? 'full' : ''}"><i style="width:${(occ / GYM.capacity) * 100}%"></i></div>
+          <div style="font-weight:600">${esc(classType(t, agendaDay))} ${myTag}</div>
+          <div class="muted small">${occ}/${cap} vagas ${full ? '· <b style="color:var(--danger)">lotada</b>' : `· ${cap - occ} livre(s)`}${wait ? ` · ${wait} na fila` : ''}</div>
+          <div class="bar ${full ? 'full' : ''}"><i style="width:${cap ? (occ / cap) * 100 : 100}%"></i></div>
         </div>
         ${action}
       </div>`;
-    }).join('') : emptyState('😴', 'Sem aulas nesse dia. Descanso também é treino!')}
+    }).join('') : (closureFor(agendaDay) ? emptyState('🏆', esc(closureFor(agendaDay))) : emptyState('😴', 'Sem aulas nesse dia. Descanso também é treino!'))}
     <div class="card" style="margin-top:18px">
       <h2>Minhas próximas aulas</h2>
-      ${myUpcoming().length ? `<ul class="list">${myUpcoming().map((b) => `<li><div class="grow"><div class="title">${fmtDate(b.date)} · ${b.time}</div><div class="muted small">${esc(classType(b.time))}</div></div><span class="chip ${b.status === 'waitlist' ? 'warn' : ''}">${{ booked: 'Agendada', waitlist: 'Espera', checkin: 'Check-in' }[b.status]}</span></li>`).join('')}</ul>` : '<p class="muted">Nenhuma aula agendada.</p>'}
-      <p class="muted small" style="margin-bottom:0">Regras: 1 aula por dia · cancelamento até ${GYM.cancelLimitMin} min antes · check-in liberado 30 min antes.</p>
+      ${myUpcoming().length ? `<ul class="list">${myUpcoming().map((b) => { const st = statusOf(b); return `<li><div class="grow"><div class="title">${fmtDate(b.date)} · ${b.time}</div><div class="muted small">${esc(classType(b.time, b.date))}</div></div><span class="chip ${st === 'waitlist' ? 'warn' : ''}">${st === 'waitlist' ? positionOf(b) + 'º na fila' : STATUS_LABEL[st]}</span></li>`; }).join('')}</ul>` : '<p class="muted">Nenhuma aula agendada.</p>'}
+      <p class="muted small" style="margin-bottom:0"><b>Regras:</b> as vagas são por ordem de agendamento — quem agenda primeiro garante a vaga. Turma lotada? Entre na fila: se alguém cancelar, o 1º da fila é confirmado automaticamente. 1 agendamento por dia · cancelamento até ${GYM.cancelLimitMin} min antes · check-in liberado 30 min antes.</p>
     </div>`;
   $$('[data-d]', v).forEach((b) => b.onclick = () => { agendaDay = b.dataset.d; viewAgenda(v); });
   $$('[data-book]', v).forEach((b) => b.onclick = () => { book(agendaDay, b.dataset.book); viewAgenda(v); });
@@ -421,9 +453,9 @@ function lineChart(list) {
   const y = (val) => H - P - (max === min ? 0.5 : (val - min) / (max - min)) * (H - 2 * P);
   const d = vals.map((val, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(val).toFixed(1)}`).join(' ');
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Evolução">
-    <path d="${d} L${x(pts.length - 1)},${H} L${x(0)},${H} Z" fill="rgba(125,255,43,.12)"/>
-    <path d="${d}" fill="none" stroke="#7dff2b" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-    ${vals.map((val, i) => `<circle cx="${x(i)}" cy="${y(val)}" r="3.5" fill="#7dff2b"/>`).join('')}
+    <path d="${d} L${x(pts.length - 1)},${H} L${x(0)},${H} Z" fill="rgba(255,59,68,.14)"/>
+    <path d="${d}" fill="none" stroke="#ff3b44" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+    ${vals.map((val, i) => `<circle cx="${x(i)}" cy="${y(val)}" r="3.5" fill="#ff3b44"/>`).join('')}
   </svg><p class="muted small" style="margin:4px 0 0">Evolução${pts[0].type === 'load' ? ' (1RM estimado)' : ''} · ${fmtShort(pts[0].date)} → ${fmtShort(pts[pts.length - 1].date)}</p>`;
 }
 
@@ -455,7 +487,7 @@ function showMovement(mov) {
 
 function classTimeOptions(date, selected) {
   const slots = slotsFor(date);
-  const myB = bookings().find((b) => b.userId === me.id && b.date === date && b.status !== 'cancelled' && b.status !== 'waitlist');
+  const myB = bookings().find((b) => b.userId === me.id && b.date === date && b.status !== 'cancelled' && statusOf(b) !== 'waitlist');
   const sel = selected ?? (myB ? myB.time : '');
   return `<option value="">Fora de aula / Open Box</option>` + slots.map((t) => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
 }
@@ -603,7 +635,7 @@ function postForm() {
 // INÍCIO (dashboard)
 // =====================================================================
 function weekStreak() {
-  const done = bookings().filter((b) => b.userId === me.id && (b.status === 'checkin' || (b.status === 'booked' && classDateTime(b.date, b.time) < Date.now())));
+  const done = bookings().filter((b) => b.userId === me.id && (b.status === 'checkin' || (statusOf(b) === 'booked' && classDateTime(b.date, b.time) < Date.now())));
   const weekKey = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return isoDate(x); };
   const weeks = new Set(done.map((b) => weekKey(parseDate(b.date))));
   let n = 0; const cur = new Date();
@@ -617,17 +649,17 @@ function viewHome(v) {
   const greet = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const next = myUpcoming()[0];
   const month = today().slice(0, 7);
-  const monthClasses = bookings().filter((b) => b.userId === me.id && b.date.startsWith(month) && ['booked', 'checkin'].includes(b.status)).length;
+  const monthClasses = bookings().filter((b) => b.userId === me.id && b.date.startsWith(month) && ['booked', 'checkin'].includes(statusOf(b))).length;
   const mine = prs().filter((p) => p.userId === me.id);
   const recent = [...mine].sort((a, b) => b.created - a.created).slice(0, 4);
   const wod = db.get('wod', null);
   v.innerHTML = `
     <p class="muted" style="margin:0 0 2px">${greet},</p>
-    <h2 style="font-size:34px;margin-bottom:14px">${esc(first)} <span class="venom">🐍</span></h2>
+    <h2 style="font-size:34px;margin-bottom:14px">${esc(first)} <span class="venom">⚡</span></h2>
     <div class="card hero">
       ${next ? `<span class="muted small">PRÓXIMA AULA</span>
         <div class="big">${fmtDate(next.date)} · <span class="venom">${next.time}</span></div>
-        <div class="muted small" style="margin-bottom:12px">${esc(classType(next.time))} · ${esc(GYM.name)} ${next.status === 'waitlist' ? '· <span class="chip warn">lista de espera</span>' : ''}</div>
+        <div class="muted small" style="margin-bottom:12px">${esc(classType(next.time, next.date))} · ${esc(GYM.name)} ${statusOf(next) === 'waitlist' ? `· <span class="chip warn">${positionOf(next)}º na fila</span>` : ''}</div>
         <a class="btn sm" href="#/agenda">Ver agenda</a>`
       : `<span class="muted small">NENHUMA AULA AGENDADA</span><div class="big">Bora treinar?</div><p class="muted small">Garanta sua vaga na turma.</p><a class="btn sm" href="#/agenda">Agendar aula</a>`}
     </div>
@@ -636,6 +668,7 @@ function viewHome(v) {
       <div class="stat"><b>${mine.length}</b><span>Marcas</span></div>
       <div class="stat"><b>${weekStreak()}</b><span>Semanas seguidas</span></div>
     </div>
+    ${upcomingClosures().map(([d, msg]) => `<div class="card" style="border-color:rgba(255,194,61,.4)"><span class="chip warn">Aviso</span><div style="font-weight:600;margin-top:6px">${fmtDate(d)} — ${esc(msg)}</div></div>`).join('')}
     ${wod ? `<div class="card"><div class="card-head"><h2>${esc(wod.title || 'WOD do dia')}</h2><span class="chip gray">${fmtShort(wod.date)}</span></div><div class="wod" style="margin:0">${esc(wod.text)}</div>
       <button class="btn ghost sm" style="margin-top:12px" id="log-wod">Registrar meu resultado</button></div>` : ''}
     <div class="card">
@@ -656,7 +689,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); inst
 function viewPerfil(v) {
   const s = db.get('settings_' + me.id, { remind: true, feedNotif: true });
   const myPosts = db.get('posts', []).filter((p) => p.userId === me.id).length;
-  const totalClasses = bookings().filter((b) => b.userId === me.id && ['booked', 'checkin'].includes(b.status) && classDateTime(b.date, b.time) < Date.now()).length;
+  const totalClasses = bookings().filter((b) => b.userId === me.id && ['booked', 'checkin'].includes(statusOf(b)) && classDateTime(b.date, b.time) < Date.now()).length;
   v.innerHTML = `
     <div class="card"><div class="profile-head">
       <label style="cursor:pointer">${avatarHtml(me, 'lg')}<input type="file" accept="image/*" id="av" hidden></label>
@@ -668,6 +701,7 @@ function viewPerfil(v) {
 
     ${me.role === 'coach' ? `<div class="card"><h2>Painel do Coach</h2>
       <button class="btn" id="edit-wod">Publicar WOD do dia</button>
+      <button class="btn ghost" id="capacity" style="margin-top:8px">Limite de vagas por aula</button>
       <button class="btn ghost" id="roster" style="margin-top:8px">Lista de alunos por turma</button></div>` : ''}
 
     <div class="card"><h2>Configurações</h2>
@@ -704,9 +738,40 @@ function viewPerfil(v) {
       <button class="btn" id="w-save">Publicar</button>`, (sh) => {
       $('#w-save', sh).onclick = () => { db.set('wod', { date: today(), title: $('#w-title', sh).value.trim() || 'WOD do dia', text: $('#w-text', sh).value }); closeModal(); toast('WOD publicado para a equipe!'); };
     }); };
+    $('#capacity', v).onclick = () => {
+      const c = capSettings();
+      const days = [1, 2, 3, 4, 5, 6, 0].filter((d) => (GYM.schedule[d] || []).length);
+      openModal(`<h2>Limite de vagas</h2><p class="muted">Quem agendar primeiro garante a vaga. Passou do limite, o aluno entra na fila de espera.</p>
+        <label class="field"><span>Limite padrão (todas as aulas)</span><input class="input" id="cap-def" type="number" min="1" max="200" value="${c.default}" inputmode="numeric"></label>
+        <h3 class="group-title">Exceções por horário <span class="muted small">(vazio = padrão)</span></h3>
+        ${days.map((d) => `<div class="card" style="padding:10px 14px"><b>${WEEK_FULL[d]}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${GYM.schedule[d].map((t) => `<label class="field" style="flex:0 0 calc(33% - 8px);margin:0 0 6px"><span>${t}</span><input class="input" data-ov="${d}|${t}" type="number" min="0" max="200" value="${c.overrides[d + '|' + t] ?? ''}" placeholder="${c.default}" inputmode="numeric" style="padding:9px 8px"></label>`).join('')}</div></div>`).join('')}
+        <button class="btn" id="cap-save">Salvar limites</button>`, (sh) => {
+        $('#cap-save', sh).onclick = () => {
+          const def = parseInt($('#cap-def', sh).value, 10);
+          if (!(def > 0)) return toast('Informe um limite válido.');
+          const overrides = {};
+          $$('[data-ov]', sh).forEach((i) => { if (i.value !== '') overrides[i.dataset.ov] = Math.max(0, parseInt(i.value, 10)); });
+          // guarda quem estava confirmado para avisar quem subir da fila
+          const upcoming = [...new Set(bookings().filter((b) => b.status !== 'cancelled' && classDateTime(b.date, b.time) > Date.now()).map((b) => b.date + '|' + b.time))];
+          const before = new Map(upcoming.map((k) => { const [d, t] = k.split('|'); return [k, confirmedIds(d, t)]; }));
+          db.set('capacity', { default: def, overrides });
+          upcoming.forEach((k) => { const [d, t] = k.split('|'); notifyPromoted(d, t, before.get(k)); });
+          closeModal(); toast('Limites de vagas atualizados.');
+        };
+      });
+    };
     $('#roster', v).onclick = () => {
-      const d = today();
-      openModal(`<h2>Turmas de hoje</h2><p class="muted">${fmtDate(d)}</p>${slotsFor(d).map((t) => { const list = activeAt(d, t); return `<div class="card"><div class="card-head"><b>${t} · ${esc(classType(t))}</b><span class="chip gray">${occupancy(d, t)}/${GYM.capacity}</span></div>${list.length ? `<ul class="list">${list.map((b) => `<li><div class="grow">${esc((userById(b.userId) || { name: '?' }).name)}</div><span class="chip ${b.status === 'waitlist' ? 'warn' : ''}">${{ booked: 'Agendado', waitlist: 'Espera', checkin: 'Presente' }[b.status]}</span></li>`).join('')}</ul>` : '<p class="muted small" style="margin:0">Sem alunos do app nessa turma.</p>'}</div>`; }).join('') || emptyState('😴', 'Sem aulas hoje.')}`);
+      const renderRoster = (sh, d) => {
+        $('#roster-list', sh).innerHTML = slotsFor(d).map((t) => {
+          const q = queueAt(d, t); const cap = capacityFor(d, t);
+          return `<div class="card"><div class="card-head"><b>${t} · ${esc(classType(t, d))}</b><span class="chip gray">${Math.min(q.length, cap)}/${cap}${q.length > cap ? ` · fila ${q.length - cap}` : ''}</span></div>${q.length ? `<ul class="list">${q.map((b, i) => { const st = statusOf(b); return `<li><b class="venom" style="min-width:24px">${i + 1}º</b><div class="grow">${esc((userById(b.userId) || { name: '?' }).name)}<div class="muted small">agendou ${new Date(b.created).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div><span class="chip ${st === 'waitlist' ? 'warn' : ''}">${st === 'waitlist' ? 'Fila' : st === 'checkin' ? 'Presente' : 'Confirmado'}</span></li>`; }).join('')}</ul>` : '<p class="muted small" style="margin:0">Ninguém agendado ainda.</p>'}</div>`;
+        }).join('') || emptyState('😴', closureFor(d) || 'Sem aulas nesse dia.');
+      };
+      openModal(`<h2>Alunos por turma</h2><p class="muted" style="margin-top:0">Em ordem de agendamento.</p>
+        <label class="field"><span>Dia</span><input class="input" type="date" id="roster-day" value="${today()}"></label><div id="roster-list"></div>`, (sh) => {
+        renderRoster(sh, today());
+        $('#roster-day', sh).onchange = (e) => e.target.value && renderRoster(sh, e.target.value);
+      });
     };
   }
 }
@@ -715,7 +780,7 @@ function viewPerfil(v) {
 // AVISOS
 // =====================================================================
 function notifications() {
-  const out = [];
+  const out = db.get('inbox_' + me.id, []).filter((n) => Date.now() - n.ts < 3 * 864e5).map((n) => n.text);
   const next = myUpcoming()[0];
   if (next) {
     const mins = (classDateTime(next.date, next.time) - Date.now()) / 60e3;
@@ -723,6 +788,7 @@ function notifications() {
   }
   const wod = db.get('wod', null);
   if (wod && wod.date === today()) out.push('📋 O WOD de hoje já foi publicado pelo coach.');
+  upcomingClosures().forEach(([d, msg]) => out.push(`📢 ${fmtDate(d)}: ${msg}`));
   const mineIds = new Set(db.get('posts', []).filter((p) => p.userId === me.id).map((p) => p.id));
   const newComments = db.get('posts', []).filter((p) => mineIds.has(p.id)).flatMap((p) => p.comments.filter((c) => c.userId !== me.id && Date.now() - c.ts < 864e5));
   if (newComments.length) out.push(`💬 ${newComments.length} novo(s) comentário(s) nos seus treinos.`);

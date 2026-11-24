@@ -142,24 +142,35 @@ const TYPE_LABEL = {
 };
 
 // =====================================================================
-// Grade de aulas — Skyfit Mogi das Cruzes (PROVISÓRIA: confirmar com a unidade)
+// Grade de aulas — Skyfit Mogi das Cruzes (cronograma semanal da Venom)
 // 0 = domingo ... 6 = sábado
 // =====================================================================
 const GYM = {
   name: 'Skyfit Mogi das Cruzes',
   team: 'Venom Workout',
   instagram: 'https://www.instagram.com/crossvenomworkout/',
-  capacity: 16,
+  capacity: 16,          // padrão; o coach altera no Painel do Coach
   cancelLimitMin: 60,
   schedule: {
-    1: ['06:00', '07:00', '08:00', '12:00', '17:00', '18:00', '19:00', '20:00'],
-    2: ['06:00', '07:00', '08:00', '12:00', '17:00', '18:00', '19:00', '20:00'],
-    3: ['06:00', '07:00', '08:00', '12:00', '17:00', '18:00', '19:00', '20:00'],
-    4: ['06:00', '07:00', '08:00', '12:00', '17:00', '18:00', '19:00', '20:00'],
-    5: ['06:00', '07:00', '08:00', '12:00', '17:00', '18:00', '19:00'],
-    6: ['09:00', '10:00', '11:00'],
-    0: []
+    0: ['10:00'],                                   // domingo: aulão
+    1: ['06:00', '07:00', '18:10', '19:10', '20:10'], // segunda: manhã + noite
+    2: ['18:10', '19:10', '20:10'],                 // terça: noite
+    3: ['06:00', '07:00'],                          // quarta: manhã
+    4: ['06:00', '07:00', '18:10', '19:10', '20:10'], // quinta: manhã + noite
+    5: [],                                          // sexta: sem aula
+    6: []                                           // sábado: sem aula
   },
-  coaches: ['Coach Venom', 'Coach Skyfit'],
-  classTypes: { default: 'Cross Training', '06:00': 'Cross Training', '12:00': 'Cross Express (45 min)', '11:00': 'Open Box / LPO' }
+  coach: 'Karrasco',
+  // nome/tema da aula: 'dia|horário' > 'dia' > padrão
+  classTypes: {
+    default: 'Cross Training',
+    0: 'Aulão de Domingo',
+    '2|18:10': 'Deadly Barbell — The Clean', '2|19:10': 'Deadly Barbell — The Clean', '2|20:10': 'Deadly Barbell — The Clean',
+    '3|06:00': 'Deadly Barbell — The Clean', '3|07:00': 'Deadly Barbell — The Clean',
+    4: 'Handstand Walking'
+  },
+  // datas sem aula (feriados, campeonatos…)
+  closures: {
+    '2026-11-28': 'Não haverá aula — dia de campeonato 🏆'
+  }
 };
